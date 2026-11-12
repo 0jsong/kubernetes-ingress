@@ -694,6 +694,8 @@ type TransportServerUpstream struct {
 	Backup string `json:"backup"`
 	// The port of the backup service. The backup port is required if the backup service name is provided. The port must fall into the range 1..65535.
 	BackupPort *uint16 `json:"backupPort"`
+	// Enables using the Cluster IP and port of the service instead of the default behavior of using the IP and port of the pods. When this field is enabled, the fields that configure NGINX behavior related to multiple upstream servers (like loadBalancingMethod and nextUpstream) will have no effect, as NGINX Ingress Controller will configure NGINX with only one upstream server that will match the service Cluster IP.
+	UseClusterIP bool `json:"use-cluster-ip"`
 }
 
 // TransportServerHealthCheck defines the parameters for active Upstream HealthChecks.

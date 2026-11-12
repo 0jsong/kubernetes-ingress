@@ -27,6 +27,8 @@ type TransportServerUpstreamApplyConfiguration struct {
 	Backup *string `json:"backup,omitempty"`
 	// The port of the backup service. The backup port is required if the backup service name is provided. The port must fall into the range 1..65535.
 	BackupPort *uint16 `json:"backupPort,omitempty"`
+	// Enables using the Cluster IP and port of the service instead of the default behavior of using the IP and port of the pods. When this field is enabled, the fields that configure NGINX behavior related to multiple upstream servers (like loadBalancingMethod and nextUpstream) will have no effect, as NGINX Ingress Controller will configure NGINX with only one upstream server that will match the service Cluster IP.
+	UseClusterIP *bool `json:"use-cluster-ip,omitempty"`
 }
 
 // TransportServerUpstreamApplyConfiguration constructs a declarative configuration of the TransportServerUpstream type for use with
@@ -112,5 +114,13 @@ func (b *TransportServerUpstreamApplyConfiguration) WithBackup(value string) *Tr
 // If called multiple times, the BackupPort field is set to the value of the last call.
 func (b *TransportServerUpstreamApplyConfiguration) WithBackupPort(value uint16) *TransportServerUpstreamApplyConfiguration {
 	b.BackupPort = &value
+	return b
+}
+
+// WithUseClusterIP sets the UseClusterIP field in the declarative configuration to the given value
+// and returns the receiver, so that objects can be built by chaining "With" function invocations.
+// If called multiple times, the UseClusterIP field is set to the value of the last call.
+func (b *TransportServerUpstreamApplyConfiguration) WithUseClusterIP(value bool) *TransportServerUpstreamApplyConfiguration {
+	b.UseClusterIP = &value
 	return b
 }

@@ -1131,6 +1131,20 @@ func (lbc *LoadBalancerController) mergeableIngressRequiresEndpointsUpdate(merge
 	return lbc.ingressRequiresEndpointsUpdate(masterIngress, serviceName)
 }
 
+func (lbc *LoadBalancerController) transportServerRequiresEndpointsUpdate(tsEx *configs.TransportServerEx, svcNamespace, serviceName string) bool {
+	if tsEx.TransportServer.Namespace != svcNamespace {
+		return false
+	}
+
+	for _, upstream := range tsEx.TransportServer.Spec.Upstreams {
+		if (upstream.Service == serviceName && !upstream.UseClusterIP) || upstream.Backup == serviceName {
+			return true
+		}
+	}
+
+	return false
+}
+
 // countReadyEndpoints returns the number of ready endpoints in this endpointslice
 func countReadyEndpoints(slice discovery_v1.EndpointSlice) int {
 	count := 0

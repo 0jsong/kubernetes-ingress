@@ -225,7 +225,10 @@ func (rc *serviceReferenceChecker) IsReferencedByTransportServer(svcNamespace st
 	}
 
 	for _, u := range ts.Spec.Upstreams {
-		if u.Service == svcName || u.Backup == svcName {
+		if u.Backup == svcName {
+			return true
+		}
+		if u.Service == svcName && !(rc.hasClusterIP && u.UseClusterIP) {
 			return true
 		}
 	}

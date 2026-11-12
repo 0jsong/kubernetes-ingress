@@ -229,25 +229,38 @@ func (lbc *LoadBalancerController) createTransportServerEx(transportServer *conf
 	logger := lbc.Logger.With(logNamespaceKey, transportServer.Namespace, logKindKey, transportServerKind, logNameKey, transportServer.Name)
 
 	for _, u := range transportServer.Spec.Upstreams {
-		podEndps, external, err := lbc.getEndpointsForUpstream(transportServer.Namespace, u.Service, uint16(u.Port)) //nolint:gosec
-		if err == nil && external && lbc.isNginxPlus {
-			externalNameSvcs[configs.GenerateExternalNameSvcKey(transportServer.Namespace, u.Service)] = true
-		}
-		if err != nil {
-			nl.Warnf(logger, "Error getting Endpoints for Upstream %v: %v", u.Name, err)
-		}
-
 		// subselector is not supported yet in TransportServer upstreams. That's why we pass "nil" here
 		endpointsKey := configs.GenerateEndpointsKey(transportServer.Namespace, u.Service, nil, uint16(u.Port)) //nolint:gosec
 
-		endps := getIPAddressesFromEndpoints(podEndps)
-		endpoints[endpointsKey] = endps
+		var endps []string
+		if u.UseClusterIP {
+			s, err := lbc.getServiceForUpstream(transportServer.Namespace, u.Service, uint16(u.Port)) //nolint:gosec
+			if err != nil {
+				nl.Warnf(logger, "Error getting Service for Upstream %v: %v", u.Service, err)
+			} else if s.Spec.ClusterIP == "" || s.Spec.ClusterIP == api_v1.ClusterIPNone {
+				nl.Warnf(logger, "Error getting ClusterIP for Upstream %v: Service %v has no ClusterIP", u.Name, u.Service)
+			} else {
+				endps = append(endps, ipv6SafeAddrPort(s.Spec.ClusterIP, int32(u.Port))) //nolint:gosec
+			}
+		} else {
+			podEndps, external, err := lbc.getEndpointsForUpstream(transportServer.Namespace, u.Service, uint16(u.Port)) //nolint:gosec
+			if err == nil && external && lbc.isNginxPlus {
+				externalNameSvcs[configs.GenerateExternalNameSvcKey(transportServer.Namespace, u.Service)] = true
+			}
+			if err != nil {
+				nl.Warnf(logger, "Error getting Endpoints for Upstream %v: %v", u.Name, err)
+			}
 
-		if lbc.isNginxPlus && lbc.isPrometheusEnabled {
-			for _, endpoint := range podEndps {
-				podsByIP[endpoint.Address] = endpoint.PodName
+			endps = getIPAddressesFromEndpoints(podEndps)
+
+			if lbc.isNginxPlus && lbc.isPrometheusEnabled {
+				for _, endpoint := range podEndps {
+					podsByIP[endpoint.Address] = endpoint.PodName
+				}
 			}
 		}
+
+		endpoints[endpointsKey] = endps
 
 		if u.Backup != "" && u.BackupPort != nil {
 			bendps, backupEndpointsKey := lbc.getTransportServerBackupEndpointsAndKey(transportServer, u, externalNameSvcs)

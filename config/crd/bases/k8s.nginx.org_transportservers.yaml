@@ -252,6 +252,15 @@ spec:
                         exist, NGINX will assume the service has zero endpoints and
                         close client connections/ignore datagrams.
                       type: string
+                    use-cluster-ip:
+                      description: Enables using the Cluster IP and port of the service
+                        instead of the default behavior of using the IP and port of
+                        the pods. When this field is enabled, the fields that configure
+                        NGINX behavior related to multiple upstream servers (like
+                        loadBalancingMethod and nextUpstream) will have no effect,
+                        as NGINX Ingress Controller will configure NGINX with only
+                        one upstream server that will match the service Cluster IP.
+                      type: boolean
                   type: object
                 type: array
             type: object

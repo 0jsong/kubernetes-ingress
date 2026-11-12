@@ -6535,6 +6535,173 @@ func TestVirtualServerRequiresEndpointsUpdate(t *testing.T) {
 	}
 }
 
+func TestTransportServerRequiresEndpointsUpdate(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name         string
+		tsEx         *configs.TransportServerEx
+		svcNamespace string
+		svcName      string
+		expected     bool
+	}{
+		{
+			name: "matches regular upstream service",
+			tsEx: &configs.TransportServerEx{
+				TransportServer: &conf_v1.TransportServer{
+					ObjectMeta: meta_v1.ObjectMeta{Namespace: "default"},
+					Spec: conf_v1.TransportServerSpec{
+						Upstreams: []conf_v1.TransportServerUpstream{{Service: "backend-svc"}},
+					},
+				},
+			},
+			svcNamespace: "default",
+			svcName:      "backend-svc",
+			expected:     true,
+		},
+		{
+			name: "does not match useClusterIP upstream",
+			tsEx: &configs.TransportServerEx{
+				TransportServer: &conf_v1.TransportServer{
+					ObjectMeta: meta_v1.ObjectMeta{Namespace: "default"},
+					Spec: conf_v1.TransportServerSpec{
+						Upstreams: []conf_v1.TransportServerUpstream{{Service: "backend-svc", UseClusterIP: true}},
+					},
+				},
+			},
+			svcNamespace: "default",
+			svcName:      "backend-svc",
+			expected:     false,
+		},
+		{
+			name: "matches backup service on useClusterIP upstream",
+			tsEx: &configs.TransportServerEx{
+				TransportServer: &conf_v1.TransportServer{
+					ObjectMeta: meta_v1.ObjectMeta{Namespace: "default"},
+					Spec: conf_v1.TransportServerSpec{
+						Upstreams: []conf_v1.TransportServerUpstream{{Service: "backend-svc", Backup: "backup-svc", UseClusterIP: true}},
+					},
+				},
+			},
+			svcNamespace: "default",
+			svcName:      "backup-svc",
+			expected:     true,
+		},
+		{
+			name: "does not match service in different namespace",
+			tsEx: &configs.TransportServerEx{
+				TransportServer: &conf_v1.TransportServer{
+					ObjectMeta: meta_v1.ObjectMeta{Namespace: "default"},
+					Spec: conf_v1.TransportServerSpec{
+						Upstreams: []conf_v1.TransportServerUpstream{{Service: "backend-svc"}},
+					},
+				},
+			},
+			svcNamespace: "other",
+			svcName:      "backend-svc",
+			expected:     false,
+		},
+		{
+			name: "does not match unrelated service",
+			tsEx: &configs.TransportServerEx{
+				TransportServer: &conf_v1.TransportServer{
+					ObjectMeta: meta_v1.ObjectMeta{Namespace: "default"},
+					Spec: conf_v1.TransportServerSpec{
+						Upstreams: []conf_v1.TransportServerUpstream{{Service: "backend-svc"}},
+					},
+				},
+			},
+			svcNamespace: "default",
+			svcName:      "other-svc",
+			expected:     false,
+		},
+	}
+
+	lbc := &LoadBalancerController{}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := lbc.transportServerRequiresEndpointsUpdate(test.tsEx, test.svcNamespace, test.svcName)
+			if result != test.expected {
+				t.Fatalf("transportServerRequiresEndpointsUpdate() returned %v, expected %v", result, test.expected)
+			}
+		})
+	}
+}
+
+func TestCreateTransportServerEx_UseClusterIP(t *testing.T) {
+	t.Parallel()
+
+	clusterIPSvc := &api_v1.Service{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "clusterip-svc", Namespace: "default"},
+		Spec: api_v1.ServiceSpec{
+			ClusterIP: "10.0.0.10",
+			Ports: []api_v1.ServicePort{
+				{Name: "tcp", Port: 8080, TargetPort: intstr.FromInt(8080)},
+			},
+		},
+	}
+	headlessSvc := &api_v1.Service{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "headless-svc", Namespace: "default"},
+		Spec: api_v1.ServiceSpec{
+			ClusterIP: api_v1.ClusterIPNone,
+			Ports: []api_v1.ServicePort{
+				{Name: "tcp", Port: 8080, TargetPort: intstr.FromInt(8080)},
+			},
+		},
+	}
+	externalNameSvc := &api_v1.Service{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "external-svc", Namespace: "default"},
+		Spec: api_v1.ServiceSpec{
+			Type:         api_v1.ServiceTypeExternalName,
+			ExternalName: "example.com",
+			Ports: []api_v1.ServicePort{
+				{Name: "tcp", Port: 8080},
+			},
+		},
+	}
+
+	svcStore := cache.NewStore(cache.MetaNamespaceKeyFunc)
+	for _, s := range []*api_v1.Service{clusterIPSvc, headlessSvc, externalNameSvc} {
+		if err := svcStore.Add(s); err != nil {
+			t.Fatalf("error adding service: %v", err)
+		}
+	}
+	nsi := &namespacedInformer{
+		svcLister:           svcStore,
+		endpointSliceLister: storeToEndpointSliceLister{Store: cache.NewStore(cache.MetaNamespaceKeyFunc)},
+		podLister:           indexerToPodLister{Indexer: cache.NewIndexer(cache.MetaNamespaceKeyFunc, cache.Indexers{})},
+	}
+
+	lbc := &LoadBalancerController{
+		Logger:              nl.LoggerFromContext(context.Background()),
+		namespacedInformers: registryFrom(map[string]*namespacedInformer{"default": nsi}),
+		configuration:       &Configuration{},
+	}
+
+	ts := &conf_v1.TransportServer{
+		ObjectMeta: meta_v1.ObjectMeta{Name: "ts", Namespace: "default"},
+		Spec: conf_v1.TransportServerSpec{
+			Upstreams: []conf_v1.TransportServerUpstream{
+				{Name: "normal", Service: "clusterip-svc", Port: 8080, UseClusterIP: true},
+				{Name: "missing", Service: "missing-svc", Port: 8080, UseClusterIP: true},
+				{Name: "headless", Service: "headless-svc", Port: 8080, UseClusterIP: true},
+				{Name: "external", Service: "external-svc", Port: 8080, UseClusterIP: true},
+			},
+		},
+	}
+
+	tsEx := lbc.createTransportServerEx(ts, 9999, "", "")
+
+	wantEndpoints := map[string][]string{
+		"default/clusterip-svc:8080": {"10.0.0.10:8080"},
+		"default/missing-svc:8080":   nil,
+		"default/headless-svc:8080":  nil,
+		"default/external-svc:8080":  nil,
+	}
+	if diff := cmp.Diff(wantEndpoints, tsEx.Endpoints); diff != "" {
+		t.Errorf("createTransportServerEx() Endpoints mismatch (-want +got):\n%s", diff)
+	}
+}
+
 func TestCreateIngressExWithZoneSync(t *testing.T) {
 	t.Parallel()
 

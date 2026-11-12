@@ -1205,6 +1205,25 @@ func TestServiceIsReferencedByTransportServer(t *testing.T) {
 			expected:         false,
 			msg:              "wrong name for service in an upstream",
 		},
+		{
+			ts: &conf_v1.TransportServer{
+				ObjectMeta: v1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: conf_v1.TransportServerSpec{
+					Upstreams: []conf_v1.TransportServerUpstream{
+						{
+							Service:      "test-service",
+							UseClusterIP: true,
+						},
+					},
+				},
+			},
+			serviceNamespace: "default",
+			serviceName:      "test-service",
+			expected:         true,
+			msg:              "service is referenced in a use-cluster-ip upstream when checking service events",
+		},
 	}
 
 	for _, test := range tests {
@@ -1954,6 +1973,108 @@ func TestEndpointIsReferencedByVirtualServerAndVirtualServerRoutes(t *testing.T)
 		result = rc.IsReferencedByVirtualServerRoute(test.serviceNamespace, test.serviceName, test.vsr)
 		if result != test.expected {
 			t.Errorf("IsReferencedByVirtualServerRoute() returned %v but expected %v for the case of %s", result, test.expected, test.msg)
+		}
+	}
+}
+
+func TestEndpointIsReferencedByTransportServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		ts               *conf_v1.TransportServer
+		serviceNamespace string
+		serviceName      string
+		expected         bool
+		msg              string
+	}{
+		{
+			ts: &conf_v1.TransportServer{
+				ObjectMeta: v1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: conf_v1.TransportServerSpec{
+					Upstreams: []conf_v1.TransportServerUpstream{
+						{
+							Service: "test-service",
+						},
+					},
+				},
+			},
+			serviceNamespace: "default",
+			serviceName:      "test-service",
+			expected:         true,
+			msg:              "service is referenced in an upstream",
+		},
+		{
+			ts: &conf_v1.TransportServer{
+				ObjectMeta: v1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: conf_v1.TransportServerSpec{
+					Upstreams: []conf_v1.TransportServerUpstream{
+						{
+							Service:      "test-service",
+							UseClusterIP: true,
+						},
+					},
+				},
+			},
+			serviceNamespace: "default",
+			serviceName:      "test-service",
+			expected:         false,
+			msg:              "upstream uses clusterIP",
+		},
+		{
+			ts: &conf_v1.TransportServer{
+				ObjectMeta: v1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: conf_v1.TransportServerSpec{
+					Upstreams: []conf_v1.TransportServerUpstream{
+						{
+							Service:      "test-service",
+							Port:         80,
+							UseClusterIP: true,
+						},
+						{
+							Service: "test-service",
+							Port:    8080,
+						},
+					},
+				},
+			},
+			serviceNamespace: "default",
+			serviceName:      "test-service",
+			expected:         true,
+			msg:              "one upstream without Cluster IP",
+		},
+		{
+			ts: &conf_v1.TransportServer{
+				ObjectMeta: v1.ObjectMeta{
+					Namespace: "default",
+				},
+				Spec: conf_v1.TransportServerSpec{
+					Upstreams: []conf_v1.TransportServerUpstream{
+						{
+							Service:      "test-service",
+							Backup:       "backup-service",
+							UseClusterIP: true,
+						},
+					},
+				},
+			},
+			serviceNamespace: "default",
+			serviceName:      "backup-service",
+			expected:         true,
+			msg:              "backup service is referenced in a use-cluster-ip upstream",
+		},
+	}
+
+	for _, test := range tests {
+		rc := newServiceReferenceChecker(true, nil)
+
+		result := rc.IsReferencedByTransportServer(test.serviceNamespace, test.serviceName, test.ts)
+		if result != test.expected {
+			t.Errorf("IsReferencedByTransportServer() returned %v but expected %v for the case of %s", result, test.expected, test.msg)
 		}
 	}
 }

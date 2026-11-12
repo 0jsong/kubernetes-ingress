@@ -701,6 +701,59 @@ class TestTransportServerTcpLoadBalance:
         self.restore_ts(kube_apis, transport_server_setup)
         delete_items_from_yaml(kube_apis, src_sec_yaml, transport_server_setup.namespace)
 
+    def test_tcp_request_use_cluster_ip(
+        self, kube_apis, crd_ingress_controller, transport_server_setup, ingress_controller_prerequisites
+    ):
+        """
+        With use-cluster-ip enabled, NGINX should configure a single upstream server matching the Service ClusterIP
+        and should not reload when backend pods scale.
+        """
+        patch_src = f"{TEST_DATA}/transport-server-tcp-load-balance/use-cluster-ip-transport-server.yaml"
+        patch_ts_from_yaml(
+            kube_apis.custom_objects,
+            transport_server_setup.name,
+            patch_src,
+            transport_server_setup.namespace,
+        )
+        wait_before_test()
+
+        svc = kube_apis.v1.read_namespaced_service("tcp-service", transport_server_setup.namespace)
+        cluster_ip = svc.spec.cluster_ip
+
+        result_conf = get_ts_nginx_template_conf(
+            kube_apis.v1,
+            transport_server_setup.namespace,
+            transport_server_setup.name,
+            transport_server_setup.ingress_pod_name,
+            ingress_controller_prerequisites.namespace,
+        )
+
+        servers = re.findall("server .*;", result_conf)
+        assert len(servers) == 1
+        assert cluster_ip in servers[0]
+
+        port = transport_server_setup.public_endpoint.tcp_server_port
+        host = transport_server_setup.public_endpoint.public_ip.strip("[]")
+        client = socket.create_connection((host, port))
+        client.sendall(b"connect")
+        response = client.recv(4096)
+        endpoint = response.decode()
+        client.close()
+        assert endpoint != ""
+
+        initial_reload_count = get_reload_count(transport_server_setup.metrics_url)
+        original = scale_deployment(
+            kube_apis.v1, kube_apis.apps_v1_api, "tcp-service", transport_server_setup.namespace, 4
+        )
+        wait_before_test()
+        scale_deployment(kube_apis.v1, kube_apis.apps_v1_api, "tcp-service", transport_server_setup.namespace, original)
+        wait_before_test()
+
+        reload_count_after_scaling = get_reload_count(transport_server_setup.metrics_url)
+        assert reload_count_after_scaling == initial_reload_count, "Expected: no new reloads when use-cluster-ip is enabled"
+
+        self.restore_ts(kube_apis, transport_server_setup)
+
 
 @pytest.mark.ts
 @pytest.mark.skip_for_loadbalancer

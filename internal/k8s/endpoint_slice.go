@@ -147,11 +147,16 @@ func (lbc *LoadBalancerController) syncEndpointSlices(task task) {
 		}
 
 		if len(resourceExes.TransportServerExes) > 0 {
-			l := lbc.Logger.With(logNamespaceKey, ns, logKindKey, endpointSliceKind, logNameKey, n)
-			nl.Debugf(l, "Updating EndpointSlices for %v", resourceExes.TransportServerExes)
-			err := lbc.configurator.UpdateEndpointsForTransportServers(resourceExes.TransportServerExes)
-			if err != nil {
-				nl.Errorf(l, "Error updating EndpointSlices for %v: %v", resourceExes.TransportServerExes, err)
+			for _, tsEx := range resourceExes.TransportServerExes {
+				if lbc.transportServerRequiresEndpointsUpdate(tsEx, endpointSlice.Namespace, svcName) {
+					l := lbc.Logger.With(logNamespaceKey, ns, logKindKey, endpointSliceKind, logNameKey, n)
+					nl.Debugf(l, "Updating EndpointSlices for %v", resourceExes.TransportServerExes)
+					err := lbc.configurator.UpdateEndpointsForTransportServers(resourceExes.TransportServerExes)
+					if err != nil {
+						nl.Errorf(l, "Error updating EndpointSlices for %v: %v", resourceExes.TransportServerExes, err)
+					}
+					break
+				}
 			}
 		}
 	}
